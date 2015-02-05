@@ -161,6 +161,13 @@ def create_bucket(module, s3, bucket, location=Location.DEFAULT):
     if bucket:
         return True
 
+def set_acl(module, s3, key, acl):
+    try:    
+        if key and acl:
+            key.set_acl(acl)
+    except s3.provider.storage_response_error, e:
+        module.fail_json(msg= str(e))
+
 def delete_bucket(module, s3, bucket):
     try:
         bucket = s3.lookup(bucket)
@@ -203,7 +210,7 @@ def path_check(path):
     else:
         return False
 
-def upload_s3file(module, s3, bucket, obj, src, expiry, metadata):
+def upload_s3file(module, s3, bucket, obj, src, expiry, metadata, acl):
     try:
         bucket = s3.lookup(bucket)
         key = bucket.new_key(obj)
@@ -213,6 +220,8 @@ def upload_s3file(module, s3, bucket, obj, src, expiry, metadata):
 
         key.set_contents_from_filename(src)
         url = key.generate_url(expiry)
+        if acl:
+            set_acl(module, s3, key, acl);
         module.exit_json(msg="PUT operation complete", url=url, changed=True)
     except s3.provider.storage_copy_error, e:
         module.fail_json(msg= str(e))
@@ -273,6 +282,7 @@ def main():
             s3_url         = dict(aliases=['S3_URL']),
             overwrite      = dict(aliases=['force'], default=True, type='bool'),
             metadata      = dict(type='dict'),
+            acl            = dict()
         ),
     )
     module = AnsibleModule(argument_spec=argument_spec)
@@ -290,6 +300,7 @@ def main():
     s3_url = module.params.get('s3_url')
     overwrite = module.params.get('overwrite')
     metadata = module.params.get('metadata')
+    acl = module.params.get('acl')
 
     region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
 
@@ -406,24 +417,24 @@ def main():
                 if md5_local == md5_remote:
                     sum_matches = True
                     if overwrite is True:
-                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata)
+                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata, acl)
                     else:
                         get_download_url(module, s3, bucket, obj, expiry, changed=False)
                 else:
                     sum_matches = False
                     if overwrite is True:
-                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata)
+                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata, acl)
                     else:
                         module.exit_json(msg="WARNING: Checksums do not match. Use overwrite parameter to force upload.")
 
         # If neither exist (based on bucket existence), we can create both.
         if bucketrtn is False and pathrtn is True:
             create_bucket(module, s3, bucket, location)
-            upload_s3file(module, s3, bucket, obj, src, expiry, metadata)
+            upload_s3file(module, s3, bucket, obj, src, expiry, metadata, acl)
 
         # If bucket exists but key doesn't, just upload.
         if bucketrtn is True and pathrtn is True and keyrtn is False:
-            upload_s3file(module, s3, bucket, obj, src, expiry, metadata)
+            upload_s3file(module, s3, bucket, obj, src, expiry, metadata, acl)
 
     # Support for deleting an object if we have both params.
     if mode == 'delete':
